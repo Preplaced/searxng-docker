@@ -1,0 +1,76 @@
+name: Production Release All Services
+
+on: workflow_dispatch
+
+jobs: 
+  build-and-push: 
+    runs-on: ubuntu-latest
+
+    steps:
+        - uses: actions/checkout@v4
+        - name: Install doctl 
+          uses: digitalocean/action-doctl@v2
+          with:
+            token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN_NEW }}
+        - name: Login To Registry
+          run: doctl registry login
+        
+        # Create Dockerfiles for all services
+        - name: Create Dockerfiles
+          run: |
+            # SearXNG Dockerfile
+            cat > Dockerfile.searxng << EOF
+            FROM docker.io/searxng/searxng:latest
+            COPY searxng/ /etc/searxng/
+            EOF
+            
+            # Caddy Dockerfile
+            cat > Dockerfile.caddy << EOF
+            FROM docker.io/library/caddy:2-alpine
+            COPY Caddyfile /etc/caddy/Caddyfile
+            EOF
+            
+            # Redis Dockerfile (optional customization)
+            cat > Dockerfile.redis << EOF
+            FROM docker.io/valkey/valkey:8-alpine
+            EOF
+        
+        # Build and push SearXNG
+        - name: Build SearXNG image
+          run: docker build . --file Dockerfile.searxng --tag registry.digitalocean.com/preplaced-container-registry/prod/learnings:latest
+        - name: Push SearXNG image
+          run: docker push registry.digitalocean.com/preplaced-container-registry/prod/learnings:latest
+        
+        # Build and push Caddy
+        - name: Build Caddy image
+          run: docker build . --file Dockerfile.caddy --tag registry.digitalocean.com/preplaced-container-registry/prod/caddy:latest
+        - name: Push Caddy image
+          run: docker push registry.digitalocean.com/preplaced-container-registry/prod/caddy:latest
+        
+        # Build and push Redis
+        - name: Build Redis image
+          run: docker build . --file Dockerfile.redis --tag registry.digitalocean.com/preplaced-container-registry/prod/redis:latest
+        - name: Push Redis image
+          run: docker push registry.digitalocean.com/preplaced-container-registry/prod/redis:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+        - uses: actions/checkout@v4
+        - name: Install doctl 
+          uses: digitalocean/action-doctl@v2
+          with:
+            token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN_NEW }}
+        - name: Save DigitalOcean kubeconfig with short-lived credentials
+          run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 preplaced-production-cluster
+        - name: Deploy to DigitalOcean Kubernetes
+          run: |
+            kubectl rollout restart deployment learnings
+            kubectl rollout restart deployment caddy
+            kubectl rollout restart deployment redis
+        - name: Verify deployment
+          run: |
+            kubectl rollout status deployment learnings
+            kubectl rollout status deployment caddy
+            kubectl rollout status deployment redis 

@@ -1,0 +1,36 @@
+name: Production Release Latest
+
+on: workflow_dispatch
+
+jobs: 
+  build: 
+    runs-on: ubuntu-latest
+
+    steps:
+        - uses: actions/checkout@v4
+        - name: Install doctl 
+          uses: digitalocean/action-doctl@v2
+          with:
+            token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN_NEW }}
+        - name: Login To Registry
+          run: doctl registry login
+        - name: Create Dockerfile for SearXNG
+          run: |
+            cat > Dockerfile << EOF
+            FROM docker.io/searxng/searxng:latest
+            
+            # Copy custom configuration
+            COPY searxng/ /etc/searxng/
+            
+            # Add any custom configurations here
+            EOF
+        - name: Build the latest SearXNG Docker image
+          run: docker build . --file Dockerfile --tag registry.digitalocean.com/preplaced-container-registry/prod/learnings:latest
+        - name: Push the latest SearXNG Docker image
+          run: docker push registry.digitalocean.com/preplaced-container-registry/prod/learnings:latest
+        - name: Save DigitalOcean kubeconfig with short-lived credentials
+          run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 preplaced-production-cluster
+        - name: Deploy to DigitalOcean Kubernetes
+          run: kubectl rollout restart deployment learnings
+        - name: Verify deployment
+          run: kubectl rollout status deployment learnings 
